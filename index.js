@@ -143,16 +143,13 @@ bot.on('message', async (msg) => {
             date: new Date().toLocaleString('ms-MY')
           });
 
-          const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(paymentUrl)}`;
-
-          const captionText = 
+          const billMessage = 
             `🛒 *Pesanan #${selectedIndex + 1}: ${product.name}*\n` +
             `💰 *Jumlah:* RM${product.price.toFixed(2)}\n\n` +
-            `📸 *Imbas QR di atas* atau tekan butang di bawah untuk pembayaran FPX / DuitNow QR.\n\n` +
-            `⚡ *Maklumat akaun akan dihantar secara automatik serta-merta selepas bayaran disahkan.*`;
+            `Tekan butang di bawah untuk membuat pembayaran secara automatik (FPX / DuitNow QR):\n\n` +
+            `⚡ *Akaun akan dihantar serta-merta selepas bayaran disahkan.*`;
 
-          return bot.sendPhoto(chatId, qrImageUrl, {
-            caption: captionText,
+          return bot.sendMessage(chatId, billMessage, {
             parse_mode: 'Markdown',
             reply_markup: {
               inline_keyboard: [
@@ -170,7 +167,7 @@ bot.on('message', async (msg) => {
   }
 });
 
-// Auto-Delivery Webhook
+// Webhook Auto-Delivery
 app.post('/payment-callback', (req, res) => {
   const { status_id, order_id } = req.body;
   if (status_id === '1') {
@@ -193,7 +190,7 @@ app.post('/payment-callback', (req, res) => {
           `🔐 *Maklumat Akaun Anda:*\n` +
           `\`\`\`\n${item.credentials}\n\`\`\`` +
           `${tncText}\n\n` +
-          `_Terima kasih atas sokongan anda! Sila simpan butiran ini._`;
+          `_Terima kasih atas pembelian anda! Sila simpan butiran ini._`;
 
         bot.sendMessage(order.chatId, deliveryMessage, { parse_mode: 'Markdown' });
       }
@@ -202,7 +199,7 @@ app.post('/payment-callback', (req, res) => {
   res.send('OK');
 });
 
-// DASHBOARD WEB (DARK THEME)
+// Web Dashboard (Dark Mode)
 app.get('/', (req, res) => {
   const totalProducts = storeData.products.length;
   const readyStock = storeData.inventory.filter(i => !i.is_sold).length;
@@ -227,7 +224,7 @@ app.get('/', (req, res) => {
     <div class="dark-card p-4 rounded-2xl shadow mb-4 flex justify-between items-center">
       <div>
         <h1 class="text-lg font-bold">🏪 Store Admin</h1>
-        <p class="text-xs text-emerald-400 font-semibold">● Sistem QR Dinamik Aktif</p>
+        <p class="text-xs text-emerald-400 font-semibold">● Mod Pautan Terus Aktif</p>
       </div>
       <span class="text-xs bg-slate-800 text-slate-300 border border-slate-700 px-3 py-1 rounded-full font-bold">RM Edition</span>
     </div>
@@ -260,7 +257,7 @@ app.get('/', (req, res) => {
       <form action="/admin/add-product" method="POST" class="space-y-3">
         <input type="text" name="name" placeholder="Nama Produk" required class="w-full text-xs p-3 rounded-xl dark-input">
         <input type="number" step="0.01" name="price" placeholder="Harga (RM)" required class="w-full text-xs p-3 rounded-xl dark-input">
-        <textarea name="tnc" placeholder="Terma & Syarat" rows="2" class="w-full text-xs p-3 rounded-xl dark-input"></textarea>
+        <textarea name="tnc" placeholder="Terma & Syarat (Dihantar selepas bayaran)" rows="2" class="w-full text-xs p-3 rounded-xl dark-input"></textarea>
         <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs py-3 rounded-xl font-bold">Simpan Produk</button>
       </form>
     </div>
@@ -366,4 +363,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server aktif pada port ${PORT}`);
 });
-      
