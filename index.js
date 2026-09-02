@@ -17,7 +17,7 @@ let storeData = {
       id: 1, 
       name: 'CapCut Pro 1 Bulan', 
       price: 10.00, 
-      tnc: '1. Akaun private 30 hari.\n2. Dilarang tukar password.\n3. Full warranty.' 
+      tnc: '1. Akaun private 30 hari.\n2. Dilarang tukar password.\n3. Warranty 30 hari jika ada isu login.' 
     }
   ],
   inventory: [
@@ -33,15 +33,15 @@ bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
 
   if (storeData.products.length === 0) {
-    return bot.sendMessage(chatId, '👋 Hai! Kedai sedang dikemas kini.');
+    return bot.sendMessage(chatId, '👋 Hai! Tiada produk tersenarai pada masa ini.');
   }
 
   const buttons = storeData.products.map(p => {
     const stockCount = storeData.inventory.filter(i => i.product_id === p.id && !i.is_sold).length;
-    return [{ text: `🛒 ${p.name} - RM${p.price.toFixed(2)} (Stok: ${stockCount})`, callback_data: `view_${p.id}` }];
+    return [{ text: `🛒 ${p.name} - RM${p.price.toFixed(2)} (Stok: ${stockCount})`, callback_data: `buy_${p.id}` }];
   });
 
-  bot.sendMessage(chatId, `👋 *Selamat Datang ke Waniiisha Store!*\n\nSila pilih produk digital di bawah:`, {
+  bot.sendMessage(chatId, `👋 *Selamat Datang ke Waniiisha Store!*\n\nSila pilih produk digital di bawah untuk membuat pembelian:`, {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: buttons }
   });
@@ -50,38 +50,6 @@ bot.onText(/\/start/, (msg) => {
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
   const data = query.data;
-
-  if (data.startsWith('view_')) {
-    const productId = parseInt(data.split('_')[1]);
-    const product = storeData.products.find(p => p.id === productId);
-    const stockCount = storeData.inventory.filter(i => i.product_id === productId && !i.is_sold).length;
-
-    if (!product) return;
-
-    const message = `📦 *${product.name}*\n💰 *Harga:* RM${product.price.toFixed(2)}\n📊 *Baki Stok:* ${stockCount}\n\n📜 *Terma & Syarat (T&C):*\n${product.tnc || 'Tiada'}`;
-
-    const buttons = [
-      [{ text: `💳 Beli Sekarang (RM${product.price.toFixed(2)})`, callback_data: `buy_${product.id}` }],
-      [{ text: `⬅️ Menu Utama`, callback_data: `menu_main` }]
-    ];
-
-    return bot.sendMessage(chatId, message, {
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: buttons }
-    });
-  }
-
-  if (data === 'menu_main') {
-    const buttons = storeData.products.map(p => {
-      const stockCount = storeData.inventory.filter(i => i.product_id === p.id && !i.is_sold).length;
-      return [{ text: `🛒 ${p.name} - RM${p.price.toFixed(2)} (Stok: ${stockCount})`, callback_data: `view_${p.id}` }];
-    });
-
-    return bot.sendMessage(chatId, `👋 *Menu Produk Waniiisha Store:*`, {
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: buttons }
-    });
-  }
 
   if (data.startsWith('buy_')) {
     const productId = parseInt(data.split('_')[1]);
@@ -127,7 +95,7 @@ bot.on('callback_query', async (query) => {
             date: new Date().toLocaleString('ms-MY')
           });
 
-          return bot.sendMessage(chatId, `🛒 *Pesanan: ${product.name}*\n💰 *Jumlah:* RM${product.price.toFixed(2)}\n\nTekan link untuk pembayaran:\n👉 ${paymentUrl}`, {
+          return bot.sendMessage(chatId, `🛒 *Pesanan:* ${product.name}\n💰 *Jumlah:* RM${product.price.toFixed(2)}\n\nTekan pautan di bawah untuk pembayaran FPX / QR:\n👉 ${paymentUrl}`, {
             parse_mode: 'Markdown'
           });
         }
@@ -140,19 +108,32 @@ bot.on('callback_query', async (query) => {
   }
 });
 
-// ToyyibPay Webhook
+// Callback Auto-Delivery Selepas Bayar (Hantar Akaun + T&C)
 app.post('/payment-callback', (req, res) => {
   const { status_id, order_id } = req.body;
   if (status_id === '1') {
     const order = storeData.orders.find(o => o.orderId === order_id && o.status === 'pending');
     if (order) {
       const item = storeData.inventory.find(i => i.product_id === order.productId && !i.is_sold);
+      const product = storeData.products.find(p => p.id === order.productId);
+
       if (item) {
         item.is_sold = true;
+        item.sold_to = order.chatId;
         order.status = 'paid';
         order.completedAt = new Date().toLocaleString('ms-MY');
 
-        bot.sendMessage(order.chatId, `🎉 *Pembayaran Berjaya!*\n\nProduk: *${order.productName}*\nMaklumat Akaun:\n\`\`\`\n${item.credentials}\n\`\`\`\n\nTerima kasih!`, { parse_mode: 'Markdown' });
+        const tncText = product?.tnc ? `\n\n📌 *Terma & Syarat (T&C):*\n${product.tnc}` : '';
+
+        const deliveryMessage = 
+          `🎉 *Pembayaran Berjaya!*\n\n` +
+          `Produk: *${order.productName}*\n\n` +
+          `🔐 *Maklumat Akaun Anda:*\n` +
+          `\`\`\`\n${item.credentials}\n\`\`\`` +
+          `${tncText}\n\n` +
+          `_Terima kasih atas pembelian anda! Sila simpan butiran ini._`;
+
+        bot.sendMessage(order.chatId, deliveryMessage, { parse_mode: 'Markdown' });
       }
     }
   }
@@ -209,7 +190,7 @@ app.get('/', (req, res) => {
       <form action="/admin/add-product" method="POST" class="space-y-3">
         <input type="text" name="name" placeholder="Nama Produk (Cth: Netflix Premium)" required class="w-full text-xs p-3 rounded-xl dark-input">
         <input type="number" step="0.01" name="price" placeholder="Harga (RM)" required class="w-full text-xs p-3 rounded-xl dark-input">
-        <textarea name="tnc" placeholder="Terma & Syarat Produk (Warranty, Rules, etc.)" rows="2" class="w-full text-xs p-3 rounded-xl dark-input"></textarea>
+        <textarea name="tnc" placeholder="Terma & Syarat Produk (Akan dihantar bersama email & pass selepas bayar)" rows="3" class="w-full text-xs p-3 rounded-xl dark-input"></textarea>
         <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs py-3 rounded-xl font-bold">Simpan Produk</button>
       </form>
     </div>
@@ -220,7 +201,7 @@ app.get('/', (req, res) => {
         <select name="product_id" class="w-full text-xs p-3 rounded-xl dark-input">
           ${storeData.products.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
         </select>
-        <textarea name="credentials" placeholder="email@gmail.com | pass123 (Satu baris setiap akaun)" required rows="3" class="w-full text-xs p-3 rounded-xl dark-input"></textarea>
+        <textarea name="credentials" placeholder="email@gmail.com | pass123 (Satu akaun setiap baris)" required rows="3" class="w-full text-xs p-3 rounded-xl dark-input"></textarea>
         <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs py-3 rounded-xl font-bold">Tambah ke Inventori</button>
       </form>
     </div>
@@ -238,8 +219,11 @@ app.get('/', (req, res) => {
                 <span class="font-bold text-blue-400">ID #${p.id}</span>
                 <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold">Stok: ${sCount}</span>
               </div>
+              <label class="text-[10px] text-slate-400">Nama Produk</label>
               <input type="text" name="name" value="${p.name}" class="w-full p-2 rounded-lg dark-input">
+              <label class="text-[10px] text-slate-400">Harga (RM)</label>
               <input type="number" step="0.01" name="price" value="${p.price}" class="w-full p-2 rounded-lg dark-input">
+              <label class="text-[10px] text-slate-400">Terma & Syarat (Dihantar selepas bayaran)</label>
               <textarea name="tnc" rows="2" class="w-full p-2 rounded-lg dark-input">${p.tnc || ''}</textarea>
               <div class="flex gap-2 pt-1">
                 <button type="submit" class="flex-1 bg-blue-600 text-white py-2 rounded-lg font-semibold">Simpan Edit</button>
