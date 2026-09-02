@@ -12,37 +12,28 @@ const TOYYIB_CAT = process.env.TOYYIB_CAT || '';
 const SERVER_URL = process.env.SERVER_URL || '';
 
 let storeData = {
-  // Pautan banner gambar kedai (boleh ditukar di kod atau dashboard)
   bannerUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1000&auto=format&fit=crop&q=80',
   products: [
-    { id: 1, name: 'GEMINI AI 18 BULAN', price: 15.00, tnc: 'Akaun private. Warranty penuh.' },
-    { id: 2, name: 'ALIGHT MOTION ANDROID 1Y', price: 12.00, tnc: 'Boleh login Android sahaja.' },
-    { id: 3, name: 'ALIGHT MOTION IOS 1 YEAR', price: 14.00, tnc: 'Khusus pengguna iPhone/iPad.' },
-    { id: 4, name: 'AMAZON PRIME VIDEO', price: 8.00, tnc: 'Private profile.' },
-    { id: 5, name: 'APPLE MUSIC 1 BULAN', price: 7.00, tnc: 'Join family link.' },
-    { id: 6, name: 'CANVA HEAD 1 BULAN', price: 5.00, tnc: 'Akaun jemputan Pro.' },
-    { id: 7, name: 'CAPCUT 7DAY', price: 4.00, tnc: 'Akaun sharing jaminan 7 hari.' },
-    { id: 8, name: 'CAPCUT PRO 1 BULAN PRIVATE', price: 10.00, tnc: 'Dilarang tukar password.' },
-    { id: 9, name: 'CHATGPT+', price: 20.00, tnc: 'Private shared access.' },
-    { id: 10, name: 'DISNEY', price: 9.00, tnc: 'Private profile 30 hari.' }
+    { 
+      id: 1, 
+      name: 'Capcut Pro 1 Month', 
+      price: 11.00, 
+      tnc: '1. Akaun private jaminan 30 hari.\n2. Dilarang tukar password akaun.\n3. Hubungi admin jika ada sebarang masalah log masuk.' 
+    }
   ],
   inventory: [
-    { id: 1, product_id: 2, credentials: 'am_android@gmail.com | pass123', is_sold: false },
-    { id: 2, product_id: 3, credentials: 'am_ios@gmail.com | pass123', is_sold: false },
-    { id: 3, product_id: 7, credentials: 'capcut7d@gmail.com | pass123', is_sold: false }
+    { id: 1, product_id: 1, credentials: 'capcutuser@gmail.com | Pass1234', is_sold: false }
   ],
   orders: []
 };
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// Fungsi Menjana Keyboard Grid Nombor
 function buildStoreKeyboard(products) {
   const keyboard = [
     [{ text: '🏷️ List Produk' }, { text: '🎟️ Voucher' }, { text: '📁 Laporan Stok' }]
   ];
 
-  // Susun nombor 5 lajur sebaris (1-5, 6-10, ...)
   let row = [];
   for (let i = 1; i <= products.length; i++) {
     row.push({ text: `${i}` });
@@ -56,7 +47,6 @@ function buildStoreKeyboard(products) {
   return keyboard;
 }
 
-// Fungsi Papar Menu Utama dengan Banner
 async function sendProductList(chatId) {
   let listText = 'LIST PRODUCT\n\n';
 
@@ -73,10 +63,7 @@ async function sendProductList(chatId) {
   try {
     await bot.sendPhoto(chatId, storeData.bannerUrl, {
       caption: listText,
-      reply_markup: {
-        keyboard: keyboard,
-        resize_keyboard: true
-      }
+      reply_markup: { keyboard: keyboard, resize_keyboard: true }
     });
   } catch (err) {
     bot.sendMessage(chatId, listText, {
@@ -85,7 +72,6 @@ async function sendProductList(chatId) {
   }
 }
 
-// 1. TELEGRAM BOT EVENT
 bot.onText(/\/start/, (msg) => {
   sendProductList(msg.chat.id);
 });
@@ -113,7 +99,6 @@ bot.on('message', async (msg) => {
     return bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
   }
 
-  // Jika Pengguna Tekan Nombor (Contoh: "1", "2", dsb.)
   const selectedIndex = parseInt(text) - 1;
   if (!isNaN(selectedIndex) && storeData.products[selectedIndex]) {
     const product = storeData.products[selectedIndex];
@@ -158,23 +143,34 @@ bot.on('message', async (msg) => {
             date: new Date().toLocaleString('ms-MY')
           });
 
-          return bot.sendMessage(chatId, 
+          const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(paymentUrl)}`;
+
+          const captionText = 
             `🛒 *Pesanan #${selectedIndex + 1}: ${product.name}*\n` +
-            `💰 *Harga:* RM${product.price.toFixed(2)}\n\n` +
-            `Tekan pautan di bawah untuk pembayaran FPX / QR:\n👉 ${paymentUrl}`, 
-            { parse_mode: 'Markdown' }
-          );
+            `💰 *Jumlah:* RM${product.price.toFixed(2)}\n\n` +
+            `📸 *Imbas QR di atas* atau tekan butang di bawah untuk pembayaran FPX / DuitNow QR.\n\n` +
+            `⚡ *Maklumat akaun akan dihantar secara automatik serta-merta selepas bayaran disahkan.*`;
+
+          return bot.sendPhoto(chatId, qrImageUrl, {
+            caption: captionText,
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '💳 Bayar Sekarang (FPX / DuitNow)', url: paymentUrl }]
+              ]
+            }
+          });
         }
       } catch (e) {
         console.error('ToyyibPay Error:', e.message);
       }
     }
 
-    return bot.sendMessage(chatId, `🛒 *Pesanan: ${product.name} (RM${product.price.toFixed(2)})*\n⚠️ Gerbang pembayaran belum diaktifkan.`, { parse_mode: 'Markdown' });
+    return bot.sendMessage(chatId, `🛒 *Pesanan: ${product.name} (RM${product.price.toFixed(2)})*\n⚠️ Gateway pembayaran sedang diselenggara.`, { parse_mode: 'Markdown' });
   }
 });
 
-// Callback Auto-Delivery Selepas Bayaran Berjaya
+// Auto-Delivery Webhook
 app.post('/payment-callback', (req, res) => {
   const { status_id, order_id } = req.body;
   if (status_id === '1') {
@@ -206,7 +202,7 @@ app.post('/payment-callback', (req, res) => {
   res.send('OK');
 });
 
-// 2. DASHBOARD WEB (DARK THEME)
+// DASHBOARD WEB (DARK THEME)
 app.get('/', (req, res) => {
   const totalProducts = storeData.products.length;
   const readyStock = storeData.inventory.filter(i => !i.is_sold).length;
@@ -231,7 +227,7 @@ app.get('/', (req, res) => {
     <div class="dark-card p-4 rounded-2xl shadow mb-4 flex justify-between items-center">
       <div>
         <h1 class="text-lg font-bold">🏪 Store Admin</h1>
-        <p class="text-xs text-emerald-400 font-semibold">● Bot Layout Mode: Grid Pad</p>
+        <p class="text-xs text-emerald-400 font-semibold">● Sistem QR Dinamik Aktif</p>
       </div>
       <span class="text-xs bg-slate-800 text-slate-300 border border-slate-700 px-3 py-1 rounded-full font-bold">RM Edition</span>
     </div>
@@ -370,3 +366,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server aktif pada port ${PORT}`);
 });
+      
