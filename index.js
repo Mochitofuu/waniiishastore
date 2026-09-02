@@ -14,7 +14,6 @@ const SERVER_URL = process.env.SERVER_URL || '';
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_KEY = process.env.SUPABASE_KEY || '';
 
-// Sambungan ke Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
@@ -38,16 +37,13 @@ function buildStoreKeyboard(products) {
 }
 
 async function sendProductList(chatId) {
-  // Tarik data terus dari Supabase
   const { data: products } = await supabase.from('products').select('*').order('id', { ascending: true });
   const { data: inventory } = await supabase.from('inventory').select('*').eq('is_sold', false);
-  const { data: settings } = await supabase.from('store_settings').select('banner_url').eq('id', 1).single();
 
-  const bannerUrl = settings?.banner_url || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1000&auto=format&fit=crop&q=80';
   const prods = products || [];
   const inv = inventory || [];
 
-  let listText = 'LIST PRODUCT\n\n';
+  let listText = '🛒 *LIST PRODUCT*\n\n';
 
   prods.forEach((p, index) => {
     const stockCount = inv.filter(i => i.product_id === p.id).length;
@@ -59,16 +55,10 @@ async function sendProductList(chatId) {
 
   const keyboard = buildStoreKeyboard(prods);
 
-  try {
-    await bot.sendPhoto(chatId, bannerUrl, {
-      caption: listText,
-      reply_markup: { keyboard: keyboard, resize_keyboard: true }
-    });
-  } catch (err) {
-    bot.sendMessage(chatId, listText, {
-      reply_markup: { keyboard: keyboard, resize_keyboard: true }
-    });
-  }
+  bot.sendMessage(chatId, listText, {
+    parse_mode: 'Markdown',
+    reply_markup: { keyboard: keyboard, resize_keyboard: true }
+  });
 }
 
 bot.onText(/\/start/, (msg) => {
@@ -101,7 +91,6 @@ bot.on('message', async (msg) => {
     return bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
   }
 
-  // Pilih produk guna nombor
   const selectedIndex = parseInt(text) - 1;
   if (!isNaN(selectedIndex)) {
     const { data: products } = await supabase.from('products').select('*').order('id', { ascending: true });
@@ -144,7 +133,6 @@ bot.on('message', async (msg) => {
           if (billCode) {
             const paymentUrl = `https://toyyibpay.com/${billCode}`;
 
-            // Simpan pesanan ke pangkalan data Supabase secara kekal
             await supabase.from('orders').insert([{
               order_id: orderId,
               product_id: product.id,
@@ -188,7 +176,6 @@ async function deliverProduct(orderId) {
   const { data: product } = await supabase.from('products').select('*').eq('id', order.product_id).single();
 
   if (item) {
-    // Kemas kini status stok dan pesanan di Supabase
     await supabase.from('inventory').update({ is_sold: true, sold_to: order.chat_id }).eq('id', item.id);
     await supabase.from('orders').update({ status: 'paid', completed_at: new Date().toISOString() }).eq('order_id', orderId);
 
@@ -235,17 +222,15 @@ app.get('/payment-return', async (req, res) => {
   `);
 });
 
-// 2. DASHBOARD WEB (BACA TERUS DARI SUPABASE)
+// 2. DASHBOARD WEB (DARK THEME - TANPA BANNER)
 app.get('/', async (req, res) => {
   const { data: products } = await supabase.from('products').select('*').order('id', { ascending: true });
   const { data: inventory } = await supabase.from('inventory').select('*');
   const { data: orders } = await supabase.from('orders').select('*').order('date_created', { ascending: false });
-  const { data: settings } = await supabase.from('store_settings').select('banner_url').eq('id', 1).single();
 
   const prods = products || [];
   const inv = inventory || [];
   const ords = orders || [];
-  const bannerUrl = settings?.banner_url || '';
 
   const totalProducts = prods.length;
   const readyStock = inv.filter(i => !i.is_sold).length;
@@ -258,7 +243,7 @@ app.get('/', async (req, res) => {
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Store Admin - Supabase Database</title>
+    <title>Store Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       body { background-color: #0b0f19; color: #f1f5f9; }
@@ -270,7 +255,7 @@ app.get('/', async (req, res) => {
     <div class="dark-card p-4 rounded-2xl shadow mb-4 flex justify-between items-center">
       <div>
         <h1 class="text-lg font-bold">🏪 Store Admin</h1>
-        <p class="text-xs text-emerald-400 font-semibold">● Pangkalan Data Supabase (Kekal)</p>
+        <p class="text-xs text-emerald-400 font-semibold">● Sistem Aktif (Pangkalan Data Supabase)</p>
       </div>
       <span class="text-xs bg-slate-800 text-slate-300 border border-slate-700 px-3 py-1 rounded-full font-bold">RM Edition</span>
     </div>
@@ -288,14 +273,6 @@ app.get('/', async (req, res) => {
         <p class="text-xs text-slate-400">Total Jualan Terkumpul</p>
         <p class="text-2xl font-black text-amber-400 mt-1">RM ${totalSales.toFixed(2)}</p>
       </div>
-    </div>
-
-    <div class="dark-card p-4 rounded-2xl mb-4">
-      <h2 class="font-bold text-sm mb-3">🖼️ Kemas Kini Pautan Banner</h2>
-      <form action="/admin/update-banner" method="POST" class="space-y-2">
-        <input type="url" name="bannerUrl" value="${bannerUrl}" required class="w-full text-xs p-3 rounded-xl dark-input">
-        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs py-2.5 rounded-xl font-bold">Kemas Kini Banner</button>
-      </form>
     </div>
 
     <div class="dark-card p-4 rounded-2xl mb-4">
@@ -367,11 +344,6 @@ app.get('/', async (req, res) => {
   `);
 });
 
-app.post('/admin/update-banner', async (req, res) => {
-  await supabase.from('store_settings').upsert({ id: 1, banner_url: req.body.bannerUrl });
-  res.redirect('/');
-});
-
 app.post('/admin/add-product', async (req, res) => {
   const { name, price, tnc } = req.body;
   await supabase.from('products').insert([{ name, price: parseFloat(price), tnc: tnc || '' }]);
@@ -408,4 +380,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server aktif pada port ${PORT}`);
 });
-  
