@@ -17,7 +17,6 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY || '';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// 1. FUNGSI TELEGRAM BOT
 function buildStoreKeyboard(products) {
   const keyboard = [
     [{ text: '🏷️ List Produk' }, { text: '🎟️ Voucher' }, { text: '📁 Laporan Stok' }]
@@ -167,7 +166,6 @@ bot.on('message', async (msg) => {
   }
 });
 
-// Fungsi Serahan Akaun
 async function deliverProduct(orderId) {
   const { data: order } = await supabase.from('orders').select('*').eq('order_id', orderId).eq('status', 'pending').single();
   if (!order) return false;
@@ -194,7 +192,6 @@ async function deliverProduct(orderId) {
   return false;
 }
 
-// Webhook Pengesahan ToyyibPay
 app.all('/payment-callback', async (req, res) => {
   const data = { ...req.query, ...req.body };
   const status = data.status_id || data.status;
@@ -206,7 +203,6 @@ app.all('/payment-callback', async (req, res) => {
   res.send('OK');
 });
 
-// Halaman Kembali
 app.get('/payment-return', async (req, res) => {
   const { status_id, order_id } = req.query;
   if (status_id === '1' && order_id) {
@@ -222,7 +218,7 @@ app.get('/payment-return', async (req, res) => {
   `);
 });
 
-// 2. DASHBOARD WEB (DARK THEME - TANPA BANNER)
+// Dashboard Web
 app.get('/', async (req, res) => {
   const { data: products } = await supabase.from('products').select('*').order('id', { ascending: true });
   const { data: inventory } = await supabase.from('inventory').select('*');
@@ -255,7 +251,7 @@ app.get('/', async (req, res) => {
     <div class="dark-card p-4 rounded-2xl shadow mb-4 flex justify-between items-center">
       <div>
         <h1 class="text-lg font-bold">🏪 Store Admin</h1>
-        <p class="text-xs text-emerald-400 font-semibold">● Sistem Aktif (Pangkalan Data Supabase)</p>
+        <p class="text-xs text-emerald-400 font-semibold">● Pangkalan Data Supabase Aktif</p>
       </div>
       <span class="text-xs bg-slate-800 text-slate-300 border border-slate-700 px-3 py-1 rounded-full font-bold">RM Edition</span>
     </div>
