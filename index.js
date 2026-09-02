@@ -10,7 +10,7 @@ app.use(express.urlencoded({ extended: true }));
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const TOYYIB_SECRET = process.env.TOYYIB_SECRET || '';
 const TOYYIB_CAT = process.env.TOYYIB_CAT || '';
-const SERVER_URL = process.env.SERVER_URL || '';
+const SERVER_URL = (process.env.SERVER_URL || '').replace(/\/$/, '');
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_KEY = process.env.SUPABASE_KEY || '';
 
@@ -21,7 +21,6 @@ function buildStoreKeyboard(products) {
   const keyboard = [
     [{ text: '🏷️ List Produk' }, { text: '🎟️ Voucher' }, { text: '📁 Laporan Stok' }]
   ];
-
   let row = [];
   for (let i = 1; i <= products.length; i++) {
     row.push({ text: `${i}` });
@@ -31,33 +30,37 @@ function buildStoreKeyboard(products) {
     }
   }
   if (row.length > 0) keyboard.push(row);
-
   return keyboard;
 }
 
 async function sendProductList(chatId) {
-  const { data: products } = await supabase.from('products').select('*').order('id', { ascending: true });
-  const { data: inventory } = await supabase.from('inventory').select('*').eq('is_sold', false);
+  try {
+    const { data: products } = await supabase.from('products').select('*').order('id', { ascending: true });
+    const { data: inventory } = await supabase.from('inventory').select('*').eq('is_sold', false);
 
-  const prods = products || [];
-  const inv = inventory || [];
+    const prods = products || [];
+    const inv = inventory || [];
 
-  let listText = '🛒 *LIST PRODUCT*\n\n';
+    let listText = '🛒 *LIST PRODUCT*\n\n';
+    if (prods.length === 0) {
+      listText += 'Tiada produk tersenarai lagi.\n';
+    } else {
+      prods.forEach((p, index) => {
+        const stockCount = inv.filter(i => i.product_id === p.id).length;
+        listText += `[${index + 1}]. ${p.name.toUpperCase()} ( ${stockCount} )\n`;
+      });
+    }
 
-  prods.forEach((p, index) => {
-    const stockCount = inv.filter(i => i.product_id === p.id).length;
-    listText += `[${index + 1}]. ${p.name.toUpperCase()} ( ${stockCount} )\n`;
-  });
+    const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    listText += `\n📄 Halaman 1 / 1\n📅 ${now}`;
 
-  const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
-  listText += `\n📄 Halaman 1 / 1\n📅 ${now}`;
-
-  const keyboard = buildStoreKeyboard(prods);
-
-  bot.sendMessage(chatId, listText, {
-    parse_mode: 'Markdown',
-    reply_markup: { keyboard: keyboard, resize_keyboard: true }
-  });
+    bot.sendMessage(chatId, listText, {
+      parse_mode: 'Markdown',
+      reply_markup: { keyboard: buildStoreKeyboard(prods), resize_keyboard: true }
+    });
+  } catch (e) {
+    bot.sendMessage(chatId, '⚠️ Masalah memuatkan senarai produk.');
+  }
 }
 
 bot.onText(/\/start/, (msg) => {
@@ -69,19 +72,11 @@ bot.on('message', async (msg) => {
   const text = (msg.text || '').trim();
 
   if (text === '/start') return;
-
-  if (text === '🏷️ List Produk') {
-    return sendProductList(chatId);
-  }
-
-  if (text === '🎟️ Voucher') {
-    return bot.sendMessage(chatId, '🎟️ Tiada baucar aktif buat masa ini.');
-  }
-
+  if (text === '🏷️ List Produk') return sendProductList(chatId);
+  if (text === '🎟️ Voucher') return bot.sendMessage(chatId, '🎟️ Tiada baucar aktif buat masa ini.');
   if (text === '📁 Laporan Stok') {
     const { data: products } = await supabase.from('products').select('*').order('id', { ascending: true });
     const { data: inventory } = await supabase.from('inventory').select('*').eq('is_sold', false);
-
     let report = '📁 *LAPORAN STOK SEMASA:*\n\n';
     (products || []).forEach((p, index) => {
       const stockCount = (inventory || []).filter(i => i.product_id === p.id).length;
@@ -93,14 +88,9 @@ bot.on('message', async (msg) => {
   const selectedIndex = parseInt(text) - 1;
   if (!isNaN(selectedIndex)) {
     const { data: products } = await supabase.from('products').select('*').order('id', { ascending: true });
-    
     if (products && products[selectedIndex]) {
       const product = products[selectedIndex];
-      const { data: availableStock } = await supabase
-        .from('inventory')
-        .select('*')
-        .eq('product_id', product.id)
-        .eq('is_sold', false);
+      const { data: availableStock } = await supabase.from('inventory').select('*').eq('product_id', product.id).eq('is_sold', false);
 
       if (!availableStock || availableStock.length === 0) {
         return bot.sendMessage(chatId, `❌ Maaf, stok untuk *${product.name}* telah habis (0).`, { parse_mode: 'Markdown' });
@@ -111,7 +101,6 @@ bot.on('message', async (msg) => {
 
       if (TOYYIB_SECRET && TOYYIB_CAT) {
         try {
-          const cleanServerUrl = SERVER_URL.replace(/\/$/, '');
           const response = await axios.post('https://toyyibpay.com/index.php/api/createBill', new URLSearchParams({
             userSecretKey: TOYYIB_SECRET,
             categoryCode: TOYYIB_CAT,
@@ -120,8 +109,8 @@ bot.on('message', async (msg) => {
             billPriceSetting: 1,
             billPayorInfo: 0,
             billAmount: amountCents,
-            billReturnUrl: `${cleanServerUrl}/payment-return`,
-            billCallbackUrl: `${cleanServerUrl}/payment-callback`,
+            billReturnUrl: `${SERVER_URL}/payment-return`,
+            billCallbackUrl: `${SERVER_URL}/payment-callback`,
             billExternalReferenceNo: orderId,
             billTo: `Pelanggan-${chatId}`,
             billEmail: 'customer@tgstore.com',
@@ -131,7 +120,8 @@ bot.on('message', async (msg) => {
           const billCode = response.data[0]?.BillCode;
           if (billCode) {
             const paymentUrl = `https://toyyibpay.com/${billCode}`;
-
+            
+            // Simpan pesanan & BillCode ke Supabase
             await supabase.from('orders').insert([{
               order_id: orderId,
               product_id: product.id,
@@ -141,18 +131,15 @@ bot.on('message', async (msg) => {
               status: 'pending'
             }]);
 
-            const billMessage = 
+            return bot.sendMessage(chatId, 
               `🛒 *Pesanan #${selectedIndex + 1}: ${product.name}*\n` +
-              `💰 *Jumlah:* RM${Number(product.price).toFixed(2)}\n\n` +
-              `Tekan butang di bawah untuk membuat pembayaran FPX / DuitNow QR:\n\n` +
-              `⚡ *Maklumat akaun akan dihantar serta-merta selepas bayaran disahkan.*`;
-
-            return bot.sendMessage(chatId, billMessage, {
+              `💰 *Jumlah:* RM${Number(product.price).toFixed(2)}\n` +
+              `🔖 *No Rujukan:* \`${orderId}\`\n\n` +
+              `Tekan butang di bawah untuk membuat pembayaran (FPX / DuitNow QR):\n\n` +
+              `⚡ *Akaun akan dihantar serta-merta selepas bayaran disahkan.*`, {
               parse_mode: 'Markdown',
               reply_markup: {
-                inline_keyboard: [
-                  [{ text: '💳 Bayar Sekarang (FPX / DuitNow)', url: paymentUrl }]
-                ]
+                inline_keyboard: [[{ text: '💳 Bayar Sekarang (FPX / DuitNow)', url: paymentUrl }]]
               }
             });
           }
@@ -160,22 +147,39 @@ bot.on('message', async (msg) => {
           console.error('ToyyibPay Error:', e.message);
         }
       }
-
-      return bot.sendMessage(chatId, `🛒 *Pesanan: ${product.name}*\n⚠️ Gateway pembayaran sedang diselenggara.`, { parse_mode: 'Markdown' });
+      return bot.sendMessage(chatId, `🛒 *Pesanan: ${product.name}*\n⚠️ Gateway pembayaran sedang dikemas kini.`);
     }
   }
 });
 
-async function deliverProduct(orderId) {
-  const { data: order } = await supabase.from('orders').select('*').eq('order_id', orderId).eq('status', 'pending').single();
+// FUNGSI SERAHAN AKAUN & KEMAS KINI STATUS
+async function deliverProduct(orderIdentifier) {
+  if (!orderIdentifier) return false;
+
+  // Cari pesanan berdasarkan order_id
+  const { data: order } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('order_id', orderIdentifier)
+    .eq('status', 'pending')
+    .single();
+
   if (!order) return false;
 
-  const { data: item } = await supabase.from('inventory').select('*').eq('product_id', order.product_id).eq('is_sold', false).limit(1).single();
+  // Ambil 1 stok yang belum dijual
+  const { data: item } = await supabase
+    .from('inventory')
+    .select('*')
+    .eq('product_id', order.product_id)
+    .eq('is_sold', false)
+    .limit(1)
+    .single();
+
   const { data: product } = await supabase.from('products').select('*').eq('id', order.product_id).single();
 
   if (item) {
     await supabase.from('inventory').update({ is_sold: true, sold_to: order.chat_id }).eq('id', item.id);
-    await supabase.from('orders').update({ status: 'paid', completed_at: new Date().toISOString() }).eq('order_id', orderId);
+    await supabase.from('orders').update({ status: 'paid', completed_at: new Date().toISOString() }).eq('order_id', order.order_id);
 
     const tncText = product?.tnc ? `\n\n📌 *Terma & Syarat (T&C):*\n${product.tnc}` : '';
     const deliveryMessage = 
@@ -186,15 +190,18 @@ async function deliverProduct(orderId) {
       `${tncText}\n\n` +
       `_Terima kasih atas sokongan anda! Sila simpan butiran ini._`;
 
-    bot.sendMessage(order.chat_id, deliveryMessage, { parse_mode: 'Markdown' });
+    await bot.sendMessage(order.chat_id, deliveryMessage, { parse_mode: 'Markdown' });
     return true;
   }
   return false;
 }
 
+// 1. Webhook Server-to-Server (POST Callback dari ToyyibPay)
 app.all('/payment-callback', async (req, res) => {
   const data = { ...req.query, ...req.body };
-  const status = data.status_id || data.status;
+  console.log('ToyyibPay Webhook Received:', data);
+
+  const status = String(data.status_id || data.status || '');
   const orderId = data.order_id || data.refno;
 
   if (status === '1' && orderId) {
@@ -203,22 +210,39 @@ app.all('/payment-callback', async (req, res) => {
   res.send('OK');
 });
 
+// 2. Return URL (Bila Pembeli Selesai Bayar & Tekan Balik ke Kedai)
 app.get('/payment-return', async (req, res) => {
-  const { status_id, order_id } = req.query;
-  if (status_id === '1' && order_id) {
+  const { status_id, order_id, billcode } = req.query;
+  console.log('ToyyibPay User Return:', req.query);
+
+  if (String(status_id) === '1' && order_id) {
     await deliverProduct(order_id);
+  } else if (billcode) {
+    // Fallback: Semak status rasmi bil terus dari server ToyyibPay
+    try {
+      const checkRes = await axios.post('https://toyyibpay.com/index.php/api/getBillTransactions', new URLSearchParams({
+        billCode: billcode
+      }));
+      if (checkRes.data && checkRes.data[0] && checkRes.data[0].billpaymentStatus === '1') {
+        const refNo = checkRes.data[0].billExternalReferenceNo;
+        await deliverProduct(refNo);
+      }
+    } catch (err) {
+      console.error('Verification Error:', err.message);
+    }
   }
+
   res.send(`
     <html>
       <body style="font-family:sans-serif; text-align:center; padding:50px; background:#0b0f19; color:#fff;">
-        <h1 style="color:#10b981;">Bayaran Berjaya!</h1>
-        <p>Sila buka aplikasi Telegram anda. Butiran akaun digital telah dihantar oleh Bot.</p>
+        <h1 style="color:#10b981;">🎉 Pembayaran Berjaya!</h1>
+        <p>Sila kembali ke aplikasi Telegram. Maklumat akaun telah dihantar secara automatik oleh bot.</p>
       </body>
     </html>
   `);
 });
 
-// Dashboard Web
+// DASHBOARD WEB ADMIN
 app.get('/', async (req, res) => {
   const { data: products } = await supabase.from('products').select('*').order('id', { ascending: true });
   const { data: inventory } = await supabase.from('inventory').select('*');
@@ -231,6 +255,7 @@ app.get('/', async (req, res) => {
   const totalProducts = prods.length;
   const readyStock = inv.filter(i => !i.is_sold).length;
   const successfulOrders = ords.filter(o => o.status === 'paid');
+  const pendingOrders = ords.filter(o => o.status === 'pending');
   const totalSales = successfulOrders.reduce((sum, o) => sum + Number(o.amount), 0);
 
   res.send(`
@@ -251,9 +276,9 @@ app.get('/', async (req, res) => {
     <div class="dark-card p-4 rounded-2xl shadow mb-4 flex justify-between items-center">
       <div>
         <h1 class="text-lg font-bold">🏪 Store Admin</h1>
-        <p class="text-xs text-emerald-400 font-semibold">● Pangkalan Data Supabase Aktif</p>
+        <p class="text-xs text-emerald-400 font-semibold">● Sistem Database & Callback Aktif</p>
       </div>
-      <span class="text-xs bg-slate-800 text-slate-300 border border-slate-700 px-3 py-1 rounded-full font-bold">RM Edition</span>
+      <span class="text-xs bg-slate-800 text-slate-300 border border-slate-700 px-3 py-1 rounded-full font-bold">Live</span>
     </div>
 
     <div class="grid grid-cols-2 gap-3 mb-4">
@@ -271,6 +296,25 @@ app.get('/', async (req, res) => {
       </div>
     </div>
 
+    <!-- BUTANG BACKUP PENGESAHAN MANUAL (JIKA PERLU) -->
+    ${pendingOrders.length > 0 ? `
+    <div class="dark-card p-4 rounded-2xl mb-4 border border-amber-500/40">
+      <h2 class="font-bold text-sm text-amber-400 mb-2">⏳ Pesanan Menunggu:</h2>
+      <div class="divide-y divide-slate-800 text-xs">
+        ${pendingOrders.map(o => `
+          <div class="py-2 flex justify-between items-center">
+            <div>
+              <p class="font-bold text-white">${o.product_name} (RM${Number(o.amount).toFixed(2)})</p>
+              <p class="text-[10px] text-slate-400">${o.order_id}</p>
+            </div>
+            <a href="/admin/manual-confirm/${o.order_id}" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg font-bold">
+              Lepaskan
+            </a>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
+
     <div class="dark-card p-4 rounded-2xl mb-4">
       <h2 class="font-bold text-sm mb-3">➕ Tambah Produk Baru</h2>
       <form action="/admin/add-product" method="POST" class="space-y-3">
@@ -287,7 +331,7 @@ app.get('/', async (req, res) => {
         <select name="product_id" class="w-full text-xs p-3 rounded-xl dark-input">
           ${prods.map((p, idx) => `<option value="${p.id}">[${idx + 1}] ${p.name}</option>`).join('')}
         </select>
-        <textarea name="credentials" placeholder="email@gmail.com | pass123 (Satu baris setiap akaun)" required rows="3" class="w-full text-xs p-3 rounded-xl dark-input"></textarea>
+        <textarea name="credentials" placeholder="email@gmail.com | pass123" required rows="3" class="w-full text-xs p-3 rounded-xl dark-input"></textarea>
         <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs py-3 rounded-xl font-bold">Tambah ke Inventori</button>
       </form>
     </div>
@@ -340,9 +384,17 @@ app.get('/', async (req, res) => {
   `);
 });
 
+app.get('/admin/manual-confirm/:orderId', async (req, res) => {
+  await deliverProduct(req.params.orderId);
+  res.redirect('/');
+});
+
 app.post('/admin/add-product', async (req, res) => {
   const { name, price, tnc } = req.body;
-  await supabase.from('products').insert([{ name, price: parseFloat(price), tnc: tnc || '' }]);
+  const { error } = await supabase.from('products').insert([{ name, price: parseFloat(price), tnc: tnc || '' }]);
+  if (error) {
+    return res.send(`<body style="background:#0b0f19; color:white; padding:20px;"><h2>Ralat: ${error.message}</h2><a href="/" style="color:#38bdf8;">Kembali</a></body>`);
+  }
   res.redirect('/');
 });
 
@@ -360,19 +412,16 @@ app.get('/admin/delete-product/:id', async (req, res) => {
 app.post('/admin/add-stock', async (req, res) => {
   const { product_id, credentials } = req.body;
   const lines = credentials.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  const rows = lines.map(line => ({
-    product_id: parseInt(product_id),
-    credentials: line,
-    is_sold: false
-  }));
-  
+  const rows = lines.map(line => ({ product_id: parseInt(product_id), credentials: line, is_sold: false }));
   if (rows.length > 0) {
-    await supabase.from('inventory').insert(rows);
+    const { error } = await supabase.from('inventory').insert(rows);
+    if (error) {
+      return res.send(`<body style="background:#0b0f19; color:white; padding:20px;"><h2>Ralat Stok: ${error.message}</h2><a href="/" style="color:#38bdf8;">Kembali</a></body>`);
+    }
   }
   res.redirect('/');
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server aktif pada port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server aktif pada port ${PORT}`));
+                       
