@@ -113,6 +113,7 @@ bot.on('message', async (msg) => {
 
     if (TOYYIB_SECRET && TOYYIB_CAT) {
       try {
+        const cleanServerUrl = SERVER_URL.replace(/\/$/, '');
         const response = await axios.post('https://toyyibpay.com/index.php/api/createBill', new URLSearchParams({
           userSecretKey: TOYYIB_SECRET,
           categoryCode: TOYYIB_CAT,
@@ -121,8 +122,8 @@ bot.on('message', async (msg) => {
           billPriceSetting: 1,
           billPayorInfo: 0,
           billAmount: amountCents,
-          billReturnUrl: `${SERVER_URL}/payment-return`,
-          billCallbackUrl: `${SERVER_URL}/payment-callback`,
+          billReturnUrl: `${cleanServerUrl}/payment-return`,
+          billCallbackUrl: `${cleanServerUrl}/payment-callback`,
           billExternalReferenceNo: orderId,
           billTo: `Pelanggan-${chatId}`,
           billEmail: 'customer@tgstore.com',
@@ -145,7 +146,8 @@ bot.on('message', async (msg) => {
 
           const billMessage = 
             `🛒 *Pesanan #${selectedIndex + 1}: ${product.name}*\n` +
-            `💰 *Jumlah:* RM${product.price.toFixed(2)}\n\n` +
+            `💰 *Jumlah:* RM${product.price.toFixed(2)}\n` +
+            `🔖 *Order ID:* \`${orderId}\`\n\n` +
             `Tekan butang di bawah untuk membuat pembayaran secara automatik (FPX / DuitNow QR):\n\n` +
             `⚡ *Akaun akan dihantar serta-merta selepas bayaran disahkan.*`;
 
@@ -167,43 +169,71 @@ bot.on('message', async (msg) => {
   }
 });
 
-// Webhook Auto-Delivery
-app.post('/payment-callback', (req, res) => {
-  const { status_id, order_id } = req.body;
-  if (status_id === '1') {
-    const order = storeData.orders.find(o => o.orderId === order_id && o.status === 'pending');
-    if (order) {
-      const item = storeData.inventory.find(i => i.product_id === order.productId && !i.is_sold);
-      const product = storeData.products.find(p => p.id === order.productId);
+// Fungsi Serahan Akaun Automatik
+function deliverProduct(orderId) {
+  const order = storeData.orders.find(o => o.orderId === orderId && o.status === 'pending');
+  if (!order) return false;
 
-      if (item) {
-        item.is_sold = true;
-        item.sold_to = order.chatId;
-        order.status = 'paid';
-        order.completedAt = new Date().toLocaleString('ms-MY');
+  const item = storeData.inventory.find(i => i.product_id === order.productId && !i.is_sold);
+  const product = storeData.products.find(p => p.id === order.productId);
 
-        const tncText = product?.tnc ? `\n\n📌 *Terma & Syarat (T&C):*\n${product.tnc}` : '';
+  if (item) {
+    item.is_sold = true;
+    item.sold_to = order.chatId;
+    order.status = 'paid';
+    order.completedAt = new Date().toLocaleString('ms-MY');
 
-        const deliveryMessage = 
-          `🎉 *Pembayaran Berjaya!*\n\n` +
-          `Produk: *${order.productName}*\n\n` +
-          `🔐 *Maklumat Akaun Anda:*\n` +
-          `\`\`\`\n${item.credentials}\n\`\`\`` +
-          `${tncText}\n\n` +
-          `_Terima kasih atas pembelian anda! Sila simpan butiran ini._`;
+    const tncText = product?.tnc ? `\n\n📌 *Terma & Syarat (T&C):*\n${product.tnc}` : '';
+    const deliveryMessage = 
+      `🎉 *Pembayaran Berjaya Disahkan!*\n\n` +
+      `Produk: *${order.productName}*\n\n` +
+      `🔐 *Maklumat Akaun Anda:*\n` +
+      `\`\`\`\n${item.credentials}\n\`\`\`` +
+      `${tncText}\n\n` +
+      `_Terima kasih atas sokongan anda! Sila simpan butiran ini._`;
 
-        bot.sendMessage(order.chatId, deliveryMessage, { parse_mode: 'Markdown' });
-      }
-    }
+    bot.sendMessage(order.chatId, deliveryMessage, { parse_mode: 'Markdown' });
+    return true;
+  }
+  return false;
+}
+
+// Webhook Pengesahan ToyyibPay
+app.all('/payment-callback', (req, res) => {
+  const data = { ...req.query, ...req.body };
+  console.log('Incoming ToyyibPay Callback:', data);
+
+  const status = data.status_id || data.status;
+  const orderId = data.order_id || data.refno;
+
+  if (status === '1' && orderId) {
+    deliverProduct(orderId);
   }
   res.send('OK');
 });
 
-// Web Dashboard (Dark Mode)
+// Halaman Kembali Selepas Bayaran (Payment Return)
+app.get('/payment-return', (req, res) => {
+  const { status_id, order_id } = req.query;
+  if (status_id === '1' && order_id) {
+    deliverProduct(order_id);
+  }
+  res.send(`
+    <html>
+      <body style="font-family:sans-serif; text-align:center; padding:50px; background:#0f172a; color:#fff;">
+        <h1 style="color:#10b981;">Bayaran Berjaya!</h1>
+        <p>Sila kembali ke aplikasi Telegram anda. Butiran akaun digital telah dihantar oleh Bot.</p>
+      </body>
+    </html>
+  `);
+});
+
+// Dashboard Web
 app.get('/', (req, res) => {
   const totalProducts = storeData.products.length;
   const readyStock = storeData.inventory.filter(i => !i.is_sold).length;
   const successfulOrders = storeData.orders.filter(o => o.status === 'paid');
+  const pendingOrders = storeData.orders.filter(o => o.status === 'pending');
   const totalSales = successfulOrders.reduce((sum, o) => sum + o.amount, 0);
 
   res.send(`
@@ -224,7 +254,7 @@ app.get('/', (req, res) => {
     <div class="dark-card p-4 rounded-2xl shadow mb-4 flex justify-between items-center">
       <div>
         <h1 class="text-lg font-bold">🏪 Store Admin</h1>
-        <p class="text-xs text-emerald-400 font-semibold">● Mod Pautan Terus Aktif</p>
+        <p class="text-xs text-emerald-400 font-semibold">● Sistem Aktif</p>
       </div>
       <span class="text-xs bg-slate-800 text-slate-300 border border-slate-700 px-3 py-1 rounded-full font-bold">RM Edition</span>
     </div>
@@ -244,6 +274,25 @@ app.get('/', (req, res) => {
       </div>
     </div>
 
+    <!-- Pesanan Tertangguh / Butang Pengesahan Segera -->
+    ${pendingOrders.length > 0 ? `
+    <div class="dark-card p-4 rounded-2xl mb-4 border border-amber-500/40">
+      <h2 class="font-bold text-sm text-amber-400 mb-2">⚠️ Pesanan Menunggu Pengesahan:</h2>
+      <div class="divide-y divide-slate-800 text-xs">
+        ${pendingOrders.map(o => `
+          <div class="py-2 flex justify-between items-center">
+            <div>
+              <p class="font-bold text-white">${o.productName} (RM${o.amount.toFixed(2)})</p>
+              <p class="text-[10px] text-slate-400">ID: ${o.orderId}</p>
+            </div>
+            <a href="/admin/manual-confirm/${o.orderId}" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg font-bold">
+              Lepaskan Akaun
+            </a>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
+
     <div class="dark-card p-4 rounded-2xl mb-4">
       <h2 class="font-bold text-sm mb-3">🖼️ Kemas Kini Pautan Banner</h2>
       <form action="/admin/update-banner" method="POST" class="space-y-2">
@@ -257,7 +306,7 @@ app.get('/', (req, res) => {
       <form action="/admin/add-product" method="POST" class="space-y-3">
         <input type="text" name="name" placeholder="Nama Produk" required class="w-full text-xs p-3 rounded-xl dark-input">
         <input type="number" step="0.01" name="price" placeholder="Harga (RM)" required class="w-full text-xs p-3 rounded-xl dark-input">
-        <textarea name="tnc" placeholder="Terma & Syarat (Dihantar selepas bayaran)" rows="2" class="w-full text-xs p-3 rounded-xl dark-input"></textarea>
+        <textarea name="tnc" placeholder="Terma & Syarat" rows="2" class="w-full text-xs p-3 rounded-xl dark-input"></textarea>
         <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs py-3 rounded-xl font-bold">Simpan Produk</button>
       </form>
     </div>
@@ -319,6 +368,11 @@ app.get('/', (req, res) => {
   </body>
   </html>
   `);
+});
+
+app.get('/admin/manual-confirm/:orderId', (req, res) => {
+  deliverProduct(req.params.orderId);
+  res.redirect('/');
 });
 
 app.post('/admin/update-banner', (req, res) => {
